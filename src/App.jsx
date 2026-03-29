@@ -5,14 +5,15 @@ function App() {
   const tokenClientRef = useRef(null);
   const [gapiInited, setGapiInited] = useState(false);
   const [gisInited, setGisInited] = useState(false);
-  const [calendarResult, setCalendarResult] = useState([]);
+  const [createdEvents, setCreatedEvents] = useState([]);
+  const [newEvent, setNewEvent] = useState({ summary: "", start: "", end: "" });
+
   const CLIENT_ID = import.meta.env.VITE_APP_GOOGLE_CLIENT_ID;
   const API_KEY = import.meta.env.VITE_APP_API_KEY;
-  const isReady = gapiInited && gisInited;
   const DISCOVERY_DOC =
     "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
-
-  const SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+  const SCOPES = "https://www.googleapis.com/auth/calendar";
+  const isReady = gapiInited && gisInited;
 
   useEffect(() => {
     const initGapi = () => {
@@ -49,10 +50,9 @@ function App() {
 
   function handleAuthClick() {
     tokenClientRef.current.callback = async (resp) => {
-      if (resp.error !== undefined) {
-        throw resp;
-      }
-      await listUpcomingEvents();
+      if (resp.error !== undefined) throw resp;
+      console.log("auth success"); // add this
+      await listInterviews();
     };
 
     if (window.gapi.client.getToken() === null) {
@@ -62,23 +62,48 @@ function App() {
     }
   }
 
-  async function listUpcomingEvents() {
-    let response;
+  async function listInterviews() {
     try {
-      const request = {
-        "calendarId": "primary",
-        "timeMin": new Date().toISOString(),
-        "showDeleted": false,
-        "singleEvents": true,
-        "maxResults": 10,
-        "orderBy": "startTime",
-      };
-      response = await gapi.client.calendar.events.list(request);
-      console.log(response);
-      setCalendarResult(response.result.items);
+      const response = await window.gapi.client.calendar.events.list({
+        calendarId: "primary",
+        timeMin: new Date().toISOString(),
+        showDeleted: false,
+        singleEvents: true,
+        orderBy: "startTime",
+        privateExtendedProperty: "type=interview",
+      });
+      setCreatedEvents(response.result.items || []);
     } catch (err) {
       console.error(err);
-      return;
+    }
+  }
+
+  async function createEvent() {
+    try {
+      const event = {
+        summary: newEvent.summary,
+        start: {
+          dateTime: new Date(newEvent.start).toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        end: {
+          dateTime: new Date(newEvent.end).toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        extendedProperties: {
+          private: { type: "interview" },
+        },
+      };
+
+      await window.gapi.client.calendar.events.insert({
+        calendarId: "primary",
+        resource: event,
+      });
+
+      await listInterviews();
+      setNewEvent({ summary: "", start: "", end: "" });
+    } catch (err) {
+      console.error("Error creating event:", err);
     }
   }
 
@@ -89,13 +114,42 @@ function App() {
         <button onClick={handleAuthClick} disabled={!isReady}>
           Authorize
         </button>
-        {calendarResult.map((el) => {
-          return (
-            <>
-              <span>{el.summary}</span>
-            </>
-          );
-        })}
+
+        <input
+          type="text"
+          placeholder="Event title"
+          value={newEvent.summary}
+          onChange={(e) =>
+            setNewEvent({ ...newEvent, summary: e.target.value })
+          }
+        />
+        <input
+          type="datetime-local"
+          value={newEvent.start}
+          onChange={(e) => setNewEvent({ ...newEvent, start: e.target.value })}
+        />
+        <input
+          type="datetime-local"
+          value={newEvent.end}
+          onChange={(e) => setNewEvent({ ...newEvent, end: e.target.value })}
+        />
+        <button onClick={createEvent} disabled={!isReady}>
+          Create Event
+        </button>
+
+        {createdEvents.length === 0 ? (
+          <p>No interviews scheduled</p>
+        ) : (
+          createdEvents.map((event) => (
+            <div key={event.id}>
+              <p>
+                <strong>{event.summary}</strong>
+              </p>
+              <p>Start: {event.start.dateTime}</p>
+              <p>End: {event.end.dateTime}</p>
+            </div>
+          ))
+        )}
       </section>
     </>
   );
